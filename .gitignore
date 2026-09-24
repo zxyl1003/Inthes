@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+output/
+.dev/
+.runtime/
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key

@@ -1,0 +1,25 @@
+{
+  "name": "inthes-zotero",
+  "version": "0.10.48",
+  "private": true,
+  "license": "CC-BY-NC-4.0",
+  "description": "Inthes — A source-grounded research reading companion for Zotero",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "release:manifest": "node scripts/release-manifest.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "dompurify": "^3.2.7",
+    "katex": "0.18.7",
+    "marked": "^16.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "fflate": "^0.8.2",
+    "typescript": "^5.9.0"
+  }
+}
