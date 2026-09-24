@@ -2,11 +2,9 @@
 
 ## 分支
 
-`main` 保持可构建、可供用户安装的稳定状态。日常改动从 `main` 建立短期分支，例如 `feat/library-progress`、`fix/citations`、`docs/installation`，通过 PR 与 CI 后合并。当前维护规模不需要长期 `develop` 分支；它会带来额外合并和版本漂移。实验功能可以留在短期分支，未稳定时不合入 `main`。
+`main` 保持可构建、可供用户安装的稳定状态。日常改动从 `main` 建立短期分支，通过 PR 与 CI 后合并。
 
 正式版本使用 `vX.Y.Z` 标签和同名 GitHub Release。测试包使用 `vX.Y.Z-beta.N` 并在 GitHub 标记为 pre-release，**不更新稳定版的 `updates.json`**。发布用 XPI 以 Release 资产保存，不提交 `dist/` 到 Git。版本号遵循语义化版本：修复增 PATCH，兼容功能增 MINOR，破坏性变更增 MAJOR；0.x 阶段仍可能调整接口。
-
-安装中的开发版如需与正式版并存，必须使用不同插件 ID 和独立数据位置。当前项目不提供并行安装通道；开发测试使用独立 Zotero 配置，避免把测试任务写入日常文库。
 
 ## 本地构建
 
@@ -31,10 +29,6 @@ npm run build
 6. 用已安装上一版的 Zotero 检查更新到新版本。首次发布至少验证 XPI 手动安装和 `updates.json`、Release 资产的公开访问；真正的自动更新可在下一次版本递增时验证。
 
 `updates.json` 是稳定版本的更新通道；GitHub 仓库和 Release 必须保持公开。GitHub Release 提供 XPI，`raw.githubusercontent.com` 提供更新清单，无需自建服务器。不要删除或改名已发布版本的 XPI，否则旧清单与下载链接会失效。
-
-## 社区收录
-
-Zotero 官方目前尚未开放插件目录。公开 Release 后，可以在 [Zotero Forums](https://forums.zotero.org/) 介绍插件，并按 [Zotero Addons Scraper](https://github.com/syt2/zotero-addons-scraper) 的格式，在它的 `addons` 目录新增 `zxyl1003@Inthes`，可选标签 `{"tags":["ai","reader"]}`，然后提交 PR。文案草稿见 [社区介绍](COMMUNITY_SUBMISSION.md)。原 `zotero-chinese/zotero-plugins` 已停止接收新插件。
 
 ## 提交与安全
 
