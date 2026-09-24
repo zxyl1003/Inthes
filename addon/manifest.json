@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Inthes",
-  "version": "0.10.48",
+  "version": "0.10.49",
   "icons": { "48": "inthes.svg", "96": "inthes.svg" },
   "description": "在文献旁思考。单篇问答、多篇总结，以及由你决定保存的笔记。",
   "author": "Inthes",
