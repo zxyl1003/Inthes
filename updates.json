@@ -3,9 +3,9 @@
     "inthes@zxyl1003.github.io": {
       "updates": [
         {
-          "version": "0.10.48",
-          "update_link": "https://github.com/zxyl1003/Inthes/releases/download/v0.10.48/inthes-0.10.48.xpi",
-          "update_hash": "sha256:f8ae5f311c816160eff82c750fdaaa14ccf7723e78c854ee059369fec9af6139",
+          "version": "0.10.49",
+          "update_link": "https://github.com/zxyl1003/Inthes/releases/download/v0.10.49/inthes-0.10.49.xpi",
+          "update_hash": "sha256:3dbca82dde921b18cc843c39e673170672c9d3e7935567143b8912a244cd87c5",
           "applications": {
             "zotero": {
               "strict_min_version": "10.0",
