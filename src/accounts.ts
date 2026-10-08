@@ -22,7 +22,7 @@ class RPC {
   pending = new Map<number, { resolve: (value:any)=>void; reject:(e:Error)=>void; timer:any }>();
   listeners = new Set<(method:string, params:any)=>void>(); nextID = 1; closed = false;
   toolHandlers = new Map<string, (params:any) => Promise<ToolOutput>>();
-  constructor(public process:any, public win:any) { void this.read(); void this.drainErrors(); }
+  constructor(public process:any) { void this.read(); void this.drainErrors(); }
   async drainErrors() { try { while (await this.process.stderr.readString()) { /* CLI diagnostics are intentionally not persisted with document history. */ } } catch(error) { if (!this.closed) Zotero.debug(`Inthes CLI stderr closed: ${(error as Error).name}`); } }
   async read() {
     let buffer='';
@@ -70,7 +70,7 @@ export interface AccountConversation { id:string; compaction:number; evidence:st
 interface AccountThread { rpc:RPC; id:string; signature:string; history:string; busy:boolean; profileID?:string; persistent?:boolean; releasePending?:boolean; defaultEffort?:string; }
 interface AccountClient { signature:string; rpc:RPC; cwd:string; home:string; }
 export class Accounts {
-  clients = new Map<string,{ signature:string; rpc:RPC; cwd:string; home:string }>();
+  clients = new Map<string,AccountClient>();
   statuses = new Map<string, AccountStatus>();
   models = new Map<string, ModelOption[]>();
   listeners = new Set<(id:string)=>void>();
@@ -157,7 +157,7 @@ export class Accounts {
     const environment: Record<string,string|null>={...await this.proxyEnvironment(),OPENAI_API_KEY:null,CODEX_HOME:home};
     args.push('app-server','--stdio','-c','features.shell_tool=false','-c','features.apply_patch_freeform=false','-c','web_search="disabled"','-c','mcp_servers={}');
     const process=await Subprocess.call({command:executable,arguments:args,workdir:cwd,environment,environmentAppend:true,stderr:'pipe'});
-    const rpc=new RPC(process,this.win);
+    const rpc=new RPC(process);
     if (this.starting.get(p.id)?.token !== token) { rpc.close(); throw new Error('连接已关闭'); }
     this.starting.get(p.id)!.rpc = rpc;
     try{await rpc.request('initialize',{clientInfo:{name:'folio_zotero',title:'Inthes',version},capabilities:{experimentalApi:true}});await rpc.notify('initialized');}

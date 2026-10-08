@@ -22,6 +22,11 @@ test('the complete returned archive retains Markdown and unused API result files
   assert.deepEqual(parsed.archive!.zip,bytes);
   for(const [name,data] of Object.entries(extra))assert.deepEqual(parsed.archive!.files[name],data);
 });
+test('large compressed result files can be read without a ZIP worker',async()=>{
+  const markdown=strToU8('A'.repeat(700_000));
+  const parsed=await parseMinerUArchive(archive(blocks,{'paper/full.md':markdown}),signal(),async()=>image);
+  assert.deepEqual(parsed.archive!.files['paper/full.md'],markdown);
+});
 test('missing images, missing page metadata and unsafe ZIP entries fail instead of losing evidence',async()=>{
   for(const bytes of [archive([{type:'image',page_idx:0,img_path:'images/missing.jpg'}]),archive([{type:'text',text:'no page'}]),archive(blocks,{'../outside.json':strToU8('{}')}),zipSync({'full.md':strToU8('No page mapping')})]) {
     await assert.rejects(parseMinerUArchive(bytes,signal(),async()=>image));

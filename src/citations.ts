@@ -5,11 +5,13 @@ export function isCitationOnly(text: string) {
 }
 
 // Accept the citation formats models actually produce, while leaving code examples alone.
-export function replaceCitations(text: string, sources: Source[], render: (source: Source) => string, strict = false): string {
+export function createCitationReplacer(sources: Source[], render: (source: Source) => string, strict = false) {
+  let available: Map<string, Source>;
+  const replace = (text: string): string => {
   if (!/[\[【［]\s*S\d/.test(text)) return text;
-  const available = new Map(sources.map(source => [source.id, source]));
+  available ??= new Map(sources.map(source => [source.id, source]));
   return text.replace(/(`+)([\s\S]*?)\1|[\[【［]\s*(S\d+[^\]】］\r\n]*)[\]】］]/g, (raw, code, content: string | undefined, value: string | undefined) => {
-    if (code) return code.length < 3 && isCitationOnly(content!) ? replaceCitations(content!.trim(), sources, render, strict) : raw;
+    if (code) return code.length < 3 && isCitationOnly(content!) ? replace(content!.trim()) : raw;
     if (value === undefined) return raw;
     const identifier = value.trim().replace(/^(S\d+P\d+)P(\d+)$/, (original, page, passage) => {
       const id = `${page}C${passage}`;
@@ -60,6 +62,12 @@ export function replaceCitations(text: string, sources: Source[], render: (sourc
     }
     return selected.map(render).join('');
   });
+  };
+  return replace;
+}
+
+export function replaceCitations(text: string, sources: Source[], render: (source: Source) => string, strict = false): string {
+  return createCitationReplacer(sources, render, strict)(text);
 }
 
 export function normalizeCitations(text: string, sources: Source[], strict = false) {

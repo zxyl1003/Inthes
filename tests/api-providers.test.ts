@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newProfile } from '../src/types.ts';
-import { apiProviders, billingOptions, setBillingMode } from '../src/api-providers.ts';
+import { billingOptions, setBillingMode } from '../src/api-providers.ts';
 import { buildRequest, fetchModels } from '../src/api.ts';
 
 test('four API presets use official endpoints and existing message protocols',async()=>{
   const endpoints={qwen:'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',kimi:'https://api.moonshot.cn/v1/chat/completions',glm:'https://open.bigmodel.cn/api/paas/v4/chat/completions',minimax:'https://api.minimax.cn/anthropic/v1/messages'};
-  for(const preset of apiProviders){
+  for(const preset of Object.keys(endpoints)){
     const p={...newProfile(preset),model:'test-model'},request=buildRequest(p,'test-key',{system:'Read papers',messages:[{role:'user',content:'Question'}]});
     assert.equal(request.url,endpoints[preset as keyof typeof endpoints]);assert.equal(p.webSearch,true);
     assert.equal(request.headers[preset==='minimax'?'x-api-key':'Authorization'],preset==='minimax'?'test-key':'Bearer test-key');
@@ -25,5 +25,7 @@ test('billing changes isolate Qwen plan routes and reset incompatible model and 
   assert.equal(setBillingMode(team,'payg').baseURL,newProfile('qwen').baseURL);
   const international={...newProfile('minimax'),baseURL:'https://api.minimax.io/anthropic/v1'};
   assert.equal(setBillingMode(international,'token-plan').baseURL,international.baseURL);
+  const manual={id:'manual',name:'manual',manual:true};
+  assert.deepEqual(setBillingMode({...p,models:[...p.models,manual]},'token-plan').models,[manual]);
   for(const preset of ['glm','kimi']){assert.deepEqual(billingOptions(preset),[]);assert.throws(()=>setBillingMode(newProfile(preset),'token-plan'));}
 });

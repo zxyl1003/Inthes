@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LibraryRun, libraryState, citedSources } from '../src/library.ts';
+import { LibraryRun, libraryState } from '../src/library.ts';
+import { citedSources } from '../src/citations.ts';
 import type { LibraryServices } from '../src/library.ts';
 import type { Paper, Session, Source } from '../src/types.ts';
 import { WorkQueue } from '../src/work-queue.ts';
 import { validateSessions } from '../src/validation.ts';
 import { collectionPapers } from '../src/zotero.ts';
+
+const answer=(text:string,ids:string[])=>text+ids.map(id=>`[${id}]`).join(' ');
 
 function fixture(count=3, override:Partial<LibraryServices>={}) {
   const papers:Paper[]=Array.from({length:count},(_,i)=>({id:i+1,title:`Paper ${i+1}`,libraryID:1,attachmentID:i+101,abstract:'Contrastive learning',year:'2024'}));
@@ -14,7 +17,7 @@ function fixture(count=3, override:Partial<LibraryServices>={}) {
   const services:LibraryServices={
     async read(p,i){read.push(p.id);return {sources:[{id:`S${i}P1C1`,itemID:p.id,title:p.title,page:1,text:'Contrastive learning improves retrieval.'}]};},
     fingerprint:async p=>`unchanged-${p.id}`,index:async()=>'',image:async()=>{throw new Error('No image');},vision:false,model:'model-1',budget:2000,
-    async generate(input,onText){const text=input.messages[0].content;analyzed.push(text);const id=text.match(/\[(S\d+P1C1)\]/)?.[1];onText(`Evidence [${id}]`);},
+    async generate(input,onText){const text=input.messages[0].content;analyzed.push(text);const id=text.match(/\[(S\d+P1C1)\]/)?.[1];onText(answer('Evidence ',id?[id]:[]));},
     save:async()=>{saved.push(JSON.stringify(session));},changed:()=>{},error:e=>String((e as Error).message),...override
   };
   const run=new LibraryRun(session,controller.signal,services);
@@ -52,25 +55,27 @@ test('missing saved citations fail visibly without deleting completed analysis t
   assert.equal(h.analyzed.length,1);assert.equal(h.session.sources.some(s=>s.id==='S1P1C9'),false);
 });
 
-test('new analyses register and normalize non-ASCII and range references',async()=>{
-  const h=fixture(1,{read:async p=>({sources:[1,2,3].map(i=>({id:`S1P1C${i}`,itemID:p.id,title:p.title,page:1,text:'Evidence'}))}),generate:async(_input,onText)=>onText('Evidence 【S1P1C1】 [ S1P1C2 ] [S1P1C2-S1P1C3]')});
+test('new analyses bind citations to exact passages',async()=>{
+  const h=fixture(1,{read:async p=>({sources:[1,2,3].map(i=>({id:`S1P1C${i}`,itemID:p.id,title:p.title,page:1,text:'Evidence'}))}),generate:async(_input,onText)=>onText(answer('Evidence ',['S1P1C1','S1P1C2','S1P1C3']))});
   const result=JSON.parse((await h.run.analyze(h.session.papers,'methods')).text);
   assert.equal(result.complete,1);assert.equal(h.session.sources.length,3);
-  assert.equal(result.items[0].text,'Evidence [S1P1C1] [S1P1C2] [S1P1C2][S1P1C3]');
+  assert.equal(result.items[0].text,'Evidence [S1P1C1] [S1P1C2] [S1P1C3]');
   assert.deepEqual(h.session.library!.jobs[0].items[0].sourceIDs,['S1P1C1','S1P1C2','S1P1C3']);
 });
 
-test('model marker typos preserve the correct paper and passage in saved analysis',async()=>{
-  const h=fixture(30,{read:async(p,ordinal)=>({sources:[{id:`S${ordinal}P7C17`,itemID:p.id,title:p.title,page:7,text:'Failed geolocation evidence.'}]}),generate:async(_input,onText)=>onText('Limitations [S30P7P17]')});
+test('a malformed summary retries generation without rereading the paper or guessing its citation',async()=>{
+  let calls=0,reads=0;
+  const h=fixture(30,{read:async(p,ordinal)=>{reads++;return {sources:[{id:`S${ordinal}P7C17`,itemID:p.id,title:p.title,page:7,text:'Failed geolocation evidence.'}]};},generate:async(_input,onText)=>onText(++calls===1?'Limitations [S30C17]':answer('Limitations ',['S30P7C17']))});
   const result=JSON.parse((await h.run.analyze([h.session.papers[29]],'limitations')).text);
   assert.equal(result.complete,1);assert.equal(result.failed,0);
   assert.equal(result.items[0].text,'Limitations [S30P7C17]');assert.equal(h.session.sources[0].id,'S30P7C17');
+  assert.equal(calls,2);assert.equal(reads,1);
   assert.equal(h.session.sources[0].itemID,30);validateSessions([h.session]);
 });
 
 test('resuming partial notes restores their references before analyzing the remaining chunks',async()=>{
   let fail=true,calls=0;
-  const h=fixture(1,{extractionBudget:1000,read:async p=>({sources:[1,2].map(page=>({id:`S1P${page}C1`,itemID:p.id,title:p.title,page,text:'文'.repeat(600)}))}),generate:async(input,onText)=>{calls++;if(input.messages[0].content.includes('这是第 2/2 段')){if(fail)throw Error('Interrupted');onText('Second [S1P1C1] [S1P2C1]');}else onText('First [S1P1C1]');}});
+  const h=fixture(1,{extractionBudget:1000,read:async p=>({sources:[1,2].map(page=>({id:`S1P${page}C1`,itemID:p.id,title:p.title,page,text:'文'.repeat(600)}))}),generate:async(input,onText)=>{calls++;if(input.messages[0].content.includes('这是第 2/2 段')){if(fail)throw Error('Interrupted');onText(answer('Second ',['S1P1C1','S1P2C1']));}else onText(answer('First ',['S1P1C1']));}});
   await h.run.analyze(h.session.papers,'methods');
   const job=h.session.library!.jobs[0],before=calls;assert.equal(job.items[0].notes.length,1);
   job.items[0].notes=['First 【S1P1C1】'];job.items[0].sourceIDs=[];h.session.sources=[];fail=false;
@@ -81,7 +86,7 @@ test('resuming partial notes restores their references before analyzing the rema
 
 test('resuming after parser changes retains completed evidence and does not retry outdated papers',async()=>{
   let fail=true,fingerprintCalls=0;
-  const h=fixture(2,{generate:async(input,onText)=>{if(fail&&input.messages[0].content.includes('Paper 2'))throw Error('Unavailable');onText('Evidence [S1P1C1]');}});
+  const h=fixture(2,{generate:async(input,onText)=>{if(fail&&input.messages[0].content.includes('Paper 2'))throw Error('Unavailable');onText(answer('Evidence ',[input.messages[0].content.match(/\[(S\d+P1C1)\]/)![1]]));}});
   await h.run.execute(call('analyze_papers',{paper_ids:[],question:'Methods'}));
   const job=h.session.library!.jobs[0],completed=structuredClone(job.items[0]);
   fail=false;h.services.fingerprint=async()=>{fingerprintCalls++;return 'changed';};
@@ -231,17 +236,17 @@ test('pending tools remain observable until queued analysis and result reads hav
 
 test('later paper chunks may cite evidence already supplied to the same worker',async()=>{
   let calls=0;
-  const h=fixture(1,{extractionBudget:1000,read:async p=>({sources:[1,2].map(page=>({id:`S1P${page}C1`,itemID:p.id,title:p.title,page,text:'文'.repeat(600)}))}),generate:async(_input,onText)=>{calls++;onText(calls===1?'First [S1P1C1]':'Both [S1P1C1] [S1P2C1]');}});
+  const h=fixture(1,{extractionBudget:1000,read:async p=>({sources:[1,2].map(page=>({id:`S1P${page}C1`,itemID:p.id,title:p.title,page,text:'文'.repeat(600)}))}),generate:async(_input,onText)=>{calls++;onText(answer(calls===1?'First ':'Both ',calls===1?['S1P1C1']:['S1P1C1','S1P2C1']));}});
   const result=JSON.parse((await h.run.analyze(h.session.papers,'methods')).text);
   assert.equal(calls,2);assert.equal(result.complete,1);assert.equal(result.failed,0);
   assert.deepEqual(h.session.library!.jobs[0].items[0].sourceIDs,['S1P1C1','S1P2C1']);
 });
 
-test('chunk citations still reject unread, foreign and nonexistent evidence',async()=>{
+test('unrepairable chunk citations mark the affected claims without discarding the paper analysis',async()=>{
   for(const reference of ['S1P2C1','S2P1C1','S1P9C1']){
-    const h=fixture(1,{extractionBudget:1000,read:async p=>({sources:[1,2].map(page=>({id:`S1P${page}C1`,itemID:p.id,title:p.title,page,text:'文'.repeat(600)}))}),generate:async(_input,onText)=>onText(`Unsupported [${reference}]`)});
+    const h=fixture(1,{extractionBudget:1000,read:async p=>({sources:[1,2].map(page=>({id:`S1P${page}C1`,itemID:p.id,title:p.title,page,text:'文'.repeat(600)}))}),generate:async(_input,onText)=>onText(answer('Unsupported ',[reference]))});
     const result=JSON.parse((await h.run.analyze(h.session.papers,'methods')).text);
-    assert.equal(result.complete,0);assert.equal(result.failed,1);assert.match(result.items[0].error,/未提供的引用/);
+    assert.equal(result.complete,1);assert.equal(result.failed,0);assert.match(result.items[0].text,/原文依据未核实/);assert.doesNotMatch(h.session.library!.jobs[0].items[0].notes[0],/S1P2C1|S2P1C1|S1P9C1/);
   }
 });
 
@@ -327,7 +332,7 @@ test('retries wait for every paper in each pass and retain completed chunks',asy
       if(id===2&&attempt===2)await retry;
       if(id===1&&attempt<3||id===2&&attempt<2)throw Error('Temporary model failure');
     }
-    onText(`Evidence [S${id}P${part}C1]`);
+    onText(answer('Evidence ',[`S${id}P${part}C1`]));
   };
   const work=h.run.analyze(h.session.papers,'methods');
   while(attempts[2]<1)await new Promise(r=>setImmediate(r));

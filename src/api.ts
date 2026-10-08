@@ -18,8 +18,8 @@ export function buildRequest(p: Profile, key: string, input: ChatInput) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let body: Record<string, any> = { model: p.model, stream: true };
   let suffix = '';
-  const messages = input.messages.map(m=>({role:m.role,content:m.images?.length?[{type:'text',text:m.content},...m.images.map(i=>({type:'image_url',image_url:{url:imageURL(i)}}))]:m.content}));
   if (p.protocol === 'chat') {
+    const messages = input.messages.map(m=>({role:m.role,content:m.images?.length?[{type:'text',text:m.content},...m.images.map(i=>({type:'image_url',image_url:{url:imageURL(i)}}))]:m.content}));
     suffix = '/chat/completions'; body.messages = [{role:'system',content:input.system},...messages]; body[p.tokenField] = p.maxTokens;
     if (p.reasoning) {
       if (p.preset === 'openrouter') body.reasoning = { effort: p.reasoning };

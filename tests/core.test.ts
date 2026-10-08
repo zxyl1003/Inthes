@@ -4,6 +4,9 @@ import { buildRequest, SSEParser, readEvent, streamAPI } from '../src/api.ts';
 import { newProfile } from '../src/types.ts';
 import { chunks, estimateTokens, selectContext, sourcePassages, sourceTokens } from '../src/context.ts';
 const input = {system:'Answer from evidence.',messages:[{role:'user' as const,content:'Question'}]};
+test('token estimates preserve ASCII, Chinese and UTF-16 counts',()=>{
+  for(const [text,tokens] of [['',0],['abc',1],['abcd',2],['中文',2],['🙂',2],['a中文🙂b',5],['abc\n\t\0',2]] as const)assert.equal(estimateTokens(text),tokens);
+});
 test('maps each API protocol and keeps private Responses off storage',()=>{
   const chat=buildRequest(newProfile('deepseek'),'key',input);
   assert.equal(chat.url,'https://api.deepseek.com/chat/completions');assert.equal(chat.body.max_tokens,4096);assert.deepEqual(chat.body.thinking,{type:'enabled'});

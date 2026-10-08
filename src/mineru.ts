@@ -1,4 +1,4 @@
-import { unzip, strFromU8 } from 'fflate';
+import { unzipSync, strFromU8 } from 'fflate';
 import type { SourceImage, MinerUSettings } from './types.ts';
 import { redactError } from './errors.ts';
 import { safeAssetPath } from './figure-assets.ts';
@@ -50,25 +50,23 @@ export async function download(response: Response) {
 export async function parseMinerUArchive(bytes: Uint8Array, signal: AbortSignal,
   decodeImage: (bytes: Uint8Array, name: string) => Promise<SourceImage>): Promise<ParsedPDF> {
   if (bytes.length > maxZipBytes) throw new Error('MinerU 结果包过大');
-  const files = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
-    let total = 0, entries = 0, invalid = false;
-    const stop = () => { cancel(); reject(signal.reason || new DOMException('已停止', 'AbortError')); };
-    const cancel = unzip(bytes, { filter: file => {
+  signal.throwIfAborted();
+  let total = 0, entries = 0, invalid = false;
+  let files: Record<string, Uint8Array>;
+  try {
+    files = unzipSync(bytes, { filter: file => {
       if (++entries > 10000) { invalid = true; return false; }
       if (file.name === '__proto__' || !safeAssetPath(file.name.replace(/\/$/, ''))) { invalid = true; return false; }
       if (file.name.endsWith('/')) return false;
       total += file.originalSize;
       if (total > 128 * 1024 * 1024) { invalid = true; return false; }
       return true;
-    } }, (error, result) => {
-      signal.removeEventListener('abort', stop);
-      if (invalid) reject(new Error('MinerU 结果包包含无效路径、过大的文件或过多文件（最多 10000 项）'));
-      else if (error) reject(new Error('MinerU 结果包损坏，无法解压'));
-      else resolve(result);
-    });
-    signal.addEventListener('abort', stop, { once: true });
-    if (signal.aborted) stop();
-  });
+    } });
+  } catch {
+    if (invalid) throw new Error('MinerU 结果包包含无效路径、过大的文件或过多文件（最多 10000 项）');
+    throw new Error('MinerU 结果包损坏，无法解压');
+  }
+  if (invalid) throw new Error('MinerU 结果包包含无效路径、过大的文件或过多文件（最多 10000 项）');
   signal.throwIfAborted();
   const lists = Object.keys(files).filter(name => /(?:^|_)content_list\.json$/.test(name.split('/').at(-1)!));
   if (lists.length !== 1) throw new Error('MinerU 结果缺少可定位页码的内容列表，请重新解析');

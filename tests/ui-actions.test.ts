@@ -17,6 +17,15 @@ function harness(messages:any[]=[]) {
   return {panel,events};
 }
 
+test('generated images already loaded reuse their display URL without reading the image again',async()=>{
+  const {panel}=harness(),errors:string[]=[],img={dataset:{generatedImage:'0:0'},src:'',alt:'',isConnected:true};
+  const image={asset:'cached.png',get bytes(){throw Error('Image must not be read again');}};
+  panel.session.messages=[{role:'assistant',text:'',generatedImages:[image]}];
+  panel.root={querySelectorAll:()=>[img]};panel.generatedURLs=new Map([['cached.png','blob:cached-image']]);panel.safeError=(error:Error)=>{errors.push(error.message);return error.message;};
+  panel.loadGeneratedImages();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(img.src,'blob:cached-image');assert.deepEqual(errors,[]);
+});
+
 test('API connection cards expose four providers and plan changes clear old credentials and models',async()=>{
   const {panel}=harness();panel.pageHead=()=>'';
   const cards=panel.addView();for(const preset of ['qwen','kimi','glm','minimax'])assert.match(cards.match(new RegExp(`data-preset="${preset}"[\\s\\S]*?</button>`))?.[0]||'',/service-logo/);
@@ -32,8 +41,54 @@ test('manually entered model IDs can be selected without a model listing API and
   panel.editing=newProfile('glm');panel.modelOptions=[];panel.root={querySelector:(q:string)=>q.includes('modelID')?field:select};panel.updateStatus=()=>{};
   panel.updateModelOptions=()=>{select.value=panel.editing.model;};
   await panel.action('add-model',{});assert.equal(select.value,'glm-5.3');assert.equal(panel.modelOptions.length,1);assert.equal(field.value,'');
+  assert.equal(panel.editing.models[0].manual,true);
   field.value='glm-5.3';await panel.action('add-model',{});assert.equal(panel.modelOptions.length,1);
   field.value='invalid model';await assert.rejects(panel.action('add-model',{}),/模型 ID/);
+  await panel.action('remove-model',{dataset:{id:'glm-5.3'}});assert.equal(panel.editing.model,'');assert.equal(panel.modelOptions.length,0);assert.equal(panel.editing.models.length,0);
+});
+
+test('model refreshes preserve manual entries and metadata without restoring removed entries',async()=>{
+  const {panel}=harness(),manual={id:'local',name:'local',manual:true},shared={id:'shared',name:'shared',manual:true};
+  const form={querySelector:()=>({disabled:false})},input={value:'late'},select={value:''};
+  panel.editing=newProfile('minimax');panel.modelOptions=[manual,shared,{id:'old',name:'old'}];
+  panel.root={querySelector:(q:string)=>q==='#profile-form'?form:q.includes('modelID')?input:select};
+  panel.readForm=()=>({p:{...panel.editing,models:panel.modelOptions},key:'test-key'});panel.updateModelOptions=()=>{};panel.updateStatus=()=>{};
+  panel.getModels=async()=>[{id:'shared',name:'New name',vision:true},{id:'new',name:'new'}];
+  await panel.loadModels();
+  assert.deepEqual(Array.from(panel.modelOptions,(m:any)=>m.id),['shared','new','local']);
+  assert.equal(panel.modelOptions[0].manual,true);assert.equal(panel.modelOptions[0].vision,true);assert.equal(panel.modelOptions[0].name,'New name');
+
+  let finish!:(models:any[])=>void;panel.getModels=()=>new Promise(resolve=>finish=resolve);
+  const pending=panel.loadModels();
+  await panel.action('add-model',{});await panel.action('remove-model',{dataset:{id:'local'}});
+  finish([{id:'new',name:'new'}]);await pending;
+  assert.deepEqual(Array.from(panel.modelOptions,(m:any)=>m.id),['new','shared','late']);
+  panel.invalidateModels();assert.deepEqual(Array.from(panel.modelOptions,(m:any)=>m.id),['shared','late']);
+});
+
+test('saved manual models remain selectable after chat list refresh and reopening a connection',async()=>{
+  const {panel}=harness(),p=Object.assign(panel.profile,newProfile('kimi'),{models:[{id:'manual',name:'manual',manual:true}],model:'manual'});
+  panel.storage.state.profiles=[p];panel.storage.getKey=()=> 'test-key';
+  let saved:any;panel.storage.save=async()=>{saved=structuredClone(p);};
+  panel.modelLoadVersion=0;panel.updateModelResults=()=>{};panel.updateImageNotice=()=>{};panel.root={querySelector:()=>null};panel.prepareAccount=async()=>{};
+  panel.availableModels=Panel.prototype.availableModels;
+  panel.getModels=async()=>[{id:'remote',name:'remote'}];
+  await panel.loadChatModels();
+  assert.deepEqual(Array.from(saved.models,(m:any)=>m.id),['remote','manual']);
+  panel.storage.state.profiles=[saved];await panel.action('edit',{dataset:{id:p.id}});
+  assert.ok(panel.modelOptions.some((m:any)=>m.id==='manual'&&m.manual));
+});
+
+test('API connection settings expose manual models and their delete controls',()=>{
+  const {panel}=harness();
+  for(const preset of ['deepseek','qwen','kimi','glm','minimax','openai','gemini','anthropic','openrouter','custom']){
+    panel.editing=newProfile(preset);assert.match(panel.modelFields(),/data-action="add-model"/);
+  }
+  panel.modelOptions=[{id:'manual',name:'manual',manual:true},{id:'remote',name:'remote'}];
+  const select={value:''},list={};let markup='';
+  panel.root={querySelector:(q:string)=>q==='#available-model'?select:q==='#manual-model-list'?list:null};
+  panel.html=(target:any,value:string)=>{if(target===list)markup=value;};panel.updateReasoningOptions=()=>{};panel.selectMenu={refresh:()=>{}};
+  panel.updateModelOptions();assert.match(markup,/data-action="remove-model" data-id="manual"/);assert.doesNotMatch(markup,/data-id="remote"/);
 });
 
 test('late completion persistence cannot overwrite a new turn or a switched session',async()=>{
@@ -136,9 +191,92 @@ function readingHarness(output:(input:any,index:number)=>string) {
   Object.assign(panel.profile,newProfile('codex-account'),{model:'model'});
   Object.assign(panel,{draft:'解释方法',draftImages:[],win:{AbortController,setTimeout,clearTimeout},root:{querySelector:()=>null},syncSelection:()=>{},updateDraftImages:()=>{},updateComposer:()=>{},refreshReading:()=>{},updateContextMeter:()=>{},updateStatus:()=>{},setGenerationPhase:()=>{},renderAnswer:()=>{},scheduleAnswer:()=>{},updateLibraryProgress:()=>{},persist:async()=>{},safeError:(e:Error)=>e.message,generate:async(_p:any,input:any,onText:any,_events:any,_conversation:any,tools:any)=>{requests.push(input);if(tools?.definitions.some((t:any)=>t.name==='read_current_papers')&&!input.messages.at(-1).content.includes('<literature>'))await tools.execute({id:'read',name:'read_current_papers',arguments:{query:'解释方法',full:false}});onText(output(input,requests.length));}});
   panel.accounts.updateHistory=(id:string,history:any)=>snapshots.push({id,history});
+  // Routing tests supply completed Markdown; citation repair is tested separately.
+  panel.generateCited=(...args:any[])=>panel.generate(...args.slice(0,6));
   panel.session.papers=[{id:1,title:'Paper',libraryID:1}];panel.session.sources=[{id:'S1P1C1',itemID:1,title:'Paper',text:'Evidence'}];
   return {panel,requests,snapshots};
 }
+
+const citationResponse=(id='S1P1C1')=>`Evidence [${id}]`;
+test('account citation repair keeps completed tools and native continuation intact',async()=>{
+  for(const protocol of ['codex-account','antigravity-account']){
+    const h=readingHarness(()=>''),panel=h.panel;panel.profile.protocol=protocol;panel.controller=new AbortController();
+    let reads=0,calls=0;const shown:string[]=[],requests:any[]=[],updates:string[]=[];
+    panel.session.continuation={id:'native-checkpoint'};
+    panel.accounts.forgetSession=()=>{throw Error('local repair must not reset native continuation');};
+    const tools={definitions:[],execute:async()=>{reads++;return {text:'[S1P1C1] Paper evidence'};}};
+    panel.generate=async(_p:any,request:any,onText:any,_events:any,conversation:any,offered:any)=>{
+      requests.push({request,conversation,offered});calls++;
+      if(calls===1){await offered.execute({name:'read_papers',arguments:{}});onText('正常 [S1P1C1]。\n\nClaim [S4C23]');}
+      else {assert.match(request.messages.map((m:any)=>m.content).join('\n'),/Evidence/);assert.doesNotMatch(request.messages.at(-1).content,/正常 \[S1P1C1\]/);assert.match(updates[0],/正常/);onText(citationResponse());}
+    };
+    await Panel.prototype.generateCited.call(panel,panel.profile,{system:'Read',messages:[{role:'user',content:'Question'}]},(text:string)=>shown.push(text),{}, {id:'current',query:'Question',compaction:0,evidence:''},tools,undefined,(text:string)=>updates.push(text));
+    assert.equal(reads,1);assert.equal(calls,2);assert.deepEqual(shown,[]);assert.equal(updates.at(-1),'正常 [S1P1C1]。\n\nEvidence [S1P1C1]');assert.equal(panel.session.continuation.id,'native-checkpoint');
+    assert.equal(requests[0].conversation.id,'current');assert.equal(requests[1].conversation,undefined);assert.equal(requests[1].offered,undefined);
+  }
+});
+
+test('unprovided citations are marked locally without losing normal body text',async()=>{
+  const {panel}=readingHarness(()=>''),shown:string[]=[];panel.controller=new AbortController();
+  panel.session.messages=[{role:'assistant',text:'Previous evidence [S1P1C1]'}];let calls=0;
+  panel.generate=async(_p:any,_input:any,onText:any)=>{calls++;onText('正常正文。\n\n'+citationResponse());};
+  await Panel.prototype.generateCited.call(panel,panel.profile,{system:'Read',messages:[{role:'assistant',content:'Previous [S1P1C1]'},{role:'user',content:'New question without evidence'}]},(text:string)=>shown.push(text));
+  assert.equal(calls,3);assert.deepEqual(shown,['正常正文。\n\nEvidence （此处论断的原文依据未核实）']);
+});
+
+test('API citation correction reuses actual tool evidence without repeating a read',async()=>{
+  const {panel}=readingHarness(()=>''),shown:string[]=[],requests:any[]=[];panel.controller=new AbortController();
+  Object.assign(panel.profile,newProfile('custom'),{baseURL:'https://api.example.com/v1',model:'model',reasoning:'',contextAuto:false});
+  panel.generate=Panel.prototype.generate;panel.storage.getKey=()=> 'test-key';let reads=0;
+  const tools={definitions:[{name:'read_papers',description:'Read',parameters:{type:'object',properties:{}}}],execute:async()=>{reads++;return {text:'[S1P1C1] Actual tool evidence'};}};
+  panel.win.fetch=async(_url:string,init:any)=>{
+    const body=JSON.parse(init.body);requests.push(body);assert.equal(shown.length,0);
+    const message=requests.length===1?{content:'Reading…',tool_calls:[{id:'read',type:'function',function:{name:'read_papers',arguments:'{}'}}]}:{content:requests.length===2?'Unsupported [S4C23]':citationResponse()};
+    return Response.json({choices:[{message,finish_reason:requests.length===1?'tool_calls':'stop'}]});
+  };
+  await Panel.prototype.generateCited.call(panel,panel.profile,{system:'Read',messages:[{role:'user',content:'Question'}]},(text:string)=>shown.push(text),{},undefined,tools);
+  assert.equal(reads,1);assert.equal(requests.length,3);assert.deepEqual(shown,['Reading…\n\nEvidence [S1P1C1]']);
+  assert.equal(requests[0].tool_choice,'auto');assert.equal(requests[2].tools,undefined);
+  assert.match(JSON.stringify(requests[2].messages),/Evidence/);assert.doesNotMatch(JSON.stringify(requests[2].messages),/Reading…/);
+});
+
+test('extraction corrects a malformed summary locally before the main paper answer',async()=>{
+  const {panel}=readingHarness(()=>''),source=panel.session.sources[0];panel.controller=new AbortController();panel.generateCited=Panel.prototype.generateCited;
+  let calls=0;panel.preparePapers=async()=>{throw Error('cached paper must not be reread');};panel.session.sources[0].text='Content '.repeat(1800);
+  panel.generate=async(_p:any,_input:any,onText:any)=>onText(++calls===1?'Bad summary [S4C23]':citationResponse());
+  const result=await panel.readCurrentPapers(panel.profile,'Summary',true,1000,{},panel.controller.signal);
+  assert.ok(calls>1);assert.match(result.text,/Evidence \[S1P1C1\]/);assert.equal(result.sources[0].id,source.id);assert.doesNotMatch(result.text,/S4C23/);
+});
+
+test('automatic model metadata discovery retains the selected manual API model',async()=>{
+  const {panel}=readingHarness(()=> 'Answer [S1P1C1]');
+  Object.assign(panel.profile,newProfile('custom'),{baseURL:'https://models.example/v1',model:'manual',models:[{id:'manual',name:'manual',manual:true}]});
+  panel.availableModels=(p:any)=>p.models||[];panel.metadataChecked=new Set();panel.storage.getKey=()=> 'test-key';
+  panel.win.fetch=async()=>Response.json({data:[{id:'remote'}]});
+  await Panel.prototype.ask.call(panel);
+  assert.equal(panel.session.messages.at(-1).error,undefined);assert.ok(panel.profile.models.some((m:any)=>m.id==='manual'&&m.manual));
+});
+
+test('paper conversations use the paper title by default and preserve manual names',async()=>{
+  const {panel}=readingHarness(()=> 'Answer [S1P1C1]');
+  await Panel.prototype.ask.call(panel);
+  assert.equal(panel.session.title,'Paper');
+
+  const {panel:multiple}=readingHarness(()=> 'Answer [S1P1C1]');
+  multiple.session.papers.push({id:2,title:'Second paper',libraryID:1});
+  await Panel.prototype.ask.call(multiple);
+  assert.equal(multiple.session.title,'Paper 等 2 篇文献');
+
+  const {panel:renamed}=readingHarness(()=> 'Answer [S1P1C1]');
+  renamed.session.title='我的研究';renamed.session.renamed=true;
+  await Panel.prototype.ask.call(renamed);
+  assert.equal(renamed.session.title,'我的研究');
+
+  const {panel:withoutPaper}=readingHarness(()=> 'Answer');
+  withoutPaper.session.papers=[];withoutPaper.session.sources=[];
+  await Panel.prototype.ask.call(withoutPaper);
+  assert.equal(withoutPaper.session.title,'解释方法');
+});
 
 test('sending a follow-up reloads generated images after replacing the conversation DOM',async()=>{
   const {panel}=readingHarness(()=> 'Answer [S1P1C1]'),calls:string[]=[];
@@ -159,6 +297,49 @@ test('question-focused reading limits evidence while full reading retains the co
   assert.ok(found.sources.some((s:any)=>s.id==='S1P1C151'));assert.ok(found.sources.length<50);assert.equal(answer.retrieval.total,200);
   const full=await panel.readCurrentPapers(panel.profile,'full paper',true,100000,answer,signal);
   assert.equal(full.sources.length,200);assert.equal(answer.retrieval.retrieved,200);
+});
+
+test('MiniMax receives question-focused paper evidence before choosing tools',async()=>{
+  const {panel}=readingHarness(()=>''),source=panel.session.sources[0],reads:any[]=[],requests:any[]=[];
+  Object.assign(panel.profile,newProfile('minimax'),{model:'MiniMax-M3',models:[{id:'MiniMax-M3',name:'MiniMax-M3'}],contextAuto:false});
+  panel.availableModels=()=>[{id:'MiniMax-M3',name:'MiniMax-M3'}];
+  panel.storage.getKey=()=> 'test-key';
+  panel.draft='翻译 Robustness to Raw Demonstrations 一节';
+  panel.readCurrentPapers=async(_p:any,query:string,full:boolean)=>{reads.push({query,full});return {text:'[S1P1C1] Paper · PDF 第 1 页\nRobustness to Raw Demonstrations',images:[],sources:[source]};};
+  panel.generate=async(_p:any,input:any,onText:any)=>{requests.push(input);onText('该节讨论鲁棒性。[S1P1C1]');};
+  await Panel.prototype.ask.call(panel);
+  assert.deepEqual(reads,[{query:'翻译 Robustness to Raw Demonstrations 一节',full:false}]);
+  assert.match(requests[0].messages.at(-1).content,/Robustness to Raw Demonstrations/);
+  assert.match(requests[0].system,/无需再次询问用户是否允许调用/);
+  assert.equal(panel.session.messages.at(-1).retrieval.retrieved,1);
+  assert.equal(panel.session.messages.at(-1).error,undefined);
+});
+
+test('generation status appears below the current Inthes label and keeps it in view',()=>{
+  const {panel}=harness([{role:'user',text:'Question'},{role:'assistant',text:''}]);
+  panel.view='chat';panel.controller=new AbortController();panel.markdown=()=>'';panel.generatedImagesHTML=()=>'';panel.coverageHTML=()=>'';
+  const markup=panel.messageHTML(panel.session.messages[1],1);
+  assert.match(markup,/<div class="message-label">[\s\S]*INTHES<\/div><div class="message-progress" role="status"><\/div>/);
+  let content='';const log={scrollHeight:100,scrollTop:0,clientHeight:100};
+  const pending={closest:()=>log,classList:{toggle:()=>{}},set textContent(value:string){content=value;log.scrollHeight=120;}};
+  const fallback={textContent:'old status'};
+  panel.root={querySelector:(selector:string)=>selector.includes('.message-progress')?pending:fallback};
+  panel.generationPhase='thinking';panel.waitStarted=Date.now();panel.updateStatus();
+  assert.match(content,/思考中/);assert.equal(fallback.textContent,'');assert.equal(log.scrollTop,120);
+});
+
+test('switching connections or models keeps conversation context visible',async()=>{
+  const first={...newProfile('minimax'),id:'minimax',model:'MiniMax-M3',models:[{id:'MiniMax-M3',name:'MiniMax-M3'},{id:'MiniMax-M4',name:'MiniMax-M4'}]};
+  const second={...newProfile('deepseek'),id:'deepseek'};
+  const panel=Object.create(Panel.prototype),attributes=new Map<string,string>();let markup='';
+  const meter={getAttribute:(name:string)=>attributes.get(name),setAttribute:(name:string,value:string)=>attributes.set(name,value)};
+  Object.assign(panel,{storage:{state:{profiles:[first,second],selected:first.id},save:async()=>{}},session:{id:'session',messages:[{role:'user',text:'Explain the method '.repeat(100)},{role:'assistant',text:'The method uses evidence.'}],sources:[],evidenceTokens:0,usage:{profileID:first.id,model:first.model,through:2,compaction:0,baseline:1000,context:22000,exact:true,reported:{contextTokens:22000}}},accounts:{forgetSession:()=>{}},root:{querySelector:(selector:string)=>selector==='#context-meter'?meter:null},html:(_el:any,value:string)=>{markup=value;},availableModels:()=>first.models,closeModelPicker:()=>{}});
+  panel.refreshConnections=()=>panel.updateContextMeter();
+  panel.updateContextMeter();assert.match(markup,/22k\/200k/);
+  await panel.selectProfile(second.id);assert.doesNotMatch(markup,/>0\/200k</);assert.match(attributes.get('aria-label')!,/已用上下文 [1-9]/);
+  await panel.selectProfile(first.id);assert.match(markup,/22k\/200k/);
+  await panel.chooseModel('MiniMax-M4');assert.match(attributes.get('aria-label')!,/已用上下文 [1-9]/);
+  await panel.chooseModel('MiniMax-M3');assert.match(markup,/22k\/200k/);
 });
 
 test('multiple local reads count unique supplied passages across the current answer',async()=>{
@@ -216,6 +397,8 @@ test('direct reading rejects existing but unprovided sources while retaining val
   await Panel.prototype.ask.call(h.panel);assert.match(h.panel.session.messages.at(-1).error,/未提供/);
   h.panel.session.messages=[{role:'user',text:'以前的问题'},{role:'assistant',text:'以前已阅读的证据 [S1P2C1]'}];h.panel.draft='追问';
   await Panel.prototype.ask.call(h.panel);assert.equal(h.panel.session.messages.at(-1).error,undefined);
+  assert.match(h.requests.at(-1).messages.at(-1).content,/\[S1P2C1\] Long/);
+  assert.match(h.requests.at(-1).messages.at(-1).content,/无关/);
   h.panel.session.messages=h.panel.session.messages.slice(0,2);h.panel.session.compaction={summary:'较早对话已压缩，无原文引用。',through:2,count:1};h.panel.draft='再次追问';
   await Panel.prototype.ask.call(h.panel);assert.match(h.panel.session.messages.at(-1).error,/未提供/);
 });
@@ -236,6 +419,7 @@ test('explicit summaries bind native continuation to the supplied evidence',asyn
 test('library follow-ups omit empty images and retain normalized account history',async()=>{
   const h=readingHarness(()=>`Answer [S1P1P1]`);h.panel.session.remember=false;h.panel.session.library=libraryState(h.panel.session.papers,'Papers');
   await h.panel.askLibrary(h.panel.profile,'first',[]);await h.panel.askLibrary(h.panel.profile,'second',[]);
+  assert.equal(h.panel.session.title,'Paper');
   assert.equal(h.panel.session.messages.at(-1).error,undefined);assert.equal(h.requests.length,2);
   assert.equal(h.requests[0].messages.at(-1).images,undefined);
   assert.equal(JSON.stringify(h.requests[1].messages.slice(0,-1)),JSON.stringify(h.snapshots[0].history));

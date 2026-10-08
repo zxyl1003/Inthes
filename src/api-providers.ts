@@ -1,6 +1,5 @@
 import { presets, type Profile } from './types.ts';
 
-export const apiProviders = ['qwen','kimi','glm','minimax'];
 export function billingOptions(preset: string): [string,string][] {
   if (preset === 'qwen') return [['payg','按量付费'],['token-plan','Token Plan 个人版'],['token-plan-team','Token Plan 团队版']];
   if (preset === 'minimax') return [['payg','按量付费'],['token-plan','Token Plan']];
@@ -9,7 +8,7 @@ export function billingOptions(preset: string): [string,string][] {
 export function setBillingMode(p: Profile, mode: Profile['billingMode']): Profile {
   if (!billingOptions(p.preset).some(([id]) => id === mode)) throw new Error('此服务不支持所选计费方式');
   const plan = mode !== 'payg';
-  return { ...p, billingMode: mode, baseURL: p.preset === 'minimax' ? p.baseURL : plan ? 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' : presets.qwen.baseURL!, protocol: p.preset === 'minimax' ? p.protocol : mode === 'token-plan-team' ? 'responses' : 'chat', webSearch: p.preset !== 'qwen' || mode !== 'token-plan', model: '', models: [], visionOverrides: {}, reasoning: '', extra: '{}', headers: '{}', balanceQuery: undefined };
+  return { ...p, billingMode: mode, baseURL: p.preset === 'minimax' ? p.baseURL : plan ? 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' : presets.qwen.baseURL!, protocol: p.preset === 'minimax' ? p.protocol : mode === 'token-plan-team' ? 'responses' : 'chat', webSearch: p.preset !== 'qwen' || mode !== 'token-plan', model: '', models: p.models?.filter(m=>m.manual)||[], visionOverrides: {}, reasoning: '', extra: '{}', headers: '{}', balanceQuery: undefined };
 }
 export function providerHelp(p: Profile): { text: string; url: string } | undefined {
   if (p.preset === 'qwen') return p.billingMode && p.billingMode !== 'payg'

@@ -10,10 +10,9 @@ const array = (v: any, check: (v: any) => boolean) => Array.isArray(v) && v.ever
 const usage = (v: any) => object(v) && Object.values(v).every(number);
 export const validImage = (v: any) => object(v) && string(v.data) && /^[A-Za-z0-9+/]*={0,2}$/.test(v.data) && ['image/png','image/jpeg','image/webp'].includes(v.mimeType) && number(v.width) && number(v.height);
 export const validFigure = (v: any) => object(v) && string(v.asset) && figureAssetName.test(v.asset) && optional(v.file, f => string(f) && safeAssetPath(f)) && ['image/png','image/jpeg','image/webp'].includes(v.mimeType) && number(v.width) && v.width > 0 && number(v.height) && v.height > 0;
-const image = validImage;
 const paper = (v: any) => object(v) && number(v.id) && string(v.title) && number(v.libraryID) && optional(v.attachmentID, number) && optional(v.collectionID, number) && ['abstract','year','authors'].every(k => optional(v[k], string));
 const source = (v: any) => object(v) && id(v.id) && number(v.itemID) && string(v.title) && string(v.text) && optional(v.attachmentID, number) && optional(v.page, number) && optional(v.passage, number) && optional(v.image, validFigure);
-const message = (v: any) => object(v) && ['user','assistant'].includes(v.role) && string(v.text) && ['error','model'].every(k => optional(v[k], string)) && optional(v.images, v => array(v, image)) && optional(v.usage, usage)
+const message = (v: any) => object(v) && ['user','assistant'].includes(v.role) && string(v.text) && ['error','model'].every(k => optional(v[k], string)) && optional(v.images, v => array(v, validImage)) && optional(v.usage, usage)
   && optional(v.generatedImages, v => array(v, validFigure))
   && optional(v.retrieval, r => object(r) && [r.retrieved,r.total].every(n => Number.isInteger(n) && n >= 0) && r.retrieved <= r.total && optional(r.unreadPapers, n => Number.isInteger(n) && n >= 0));
 const library = (v: any, s: any) => {
@@ -54,7 +53,7 @@ export function validateState(value: any): State {
     && optional(p.visionOverrides, v => object(v) && Object.values(v).every(x => typeof x === 'boolean'))
     && optional(p.webSearch, v => typeof v === 'boolean')
     && optional(p.billingMode, v => ['payg','token-plan','token-plan-team'].includes(v))
-    && optional(p.models, v => array(v, m => object(m) && string(m.id) && string(m.name) && optional(m.vision, v => typeof v === 'boolean') && optional(m.contextWindow, number) && optional(m.reasoningEfforts, v => array(v, string)) && optional(m.defaultReasoning, string)));
+    && optional(p.models, v => array(v, m => object(m) && string(m.id) && string(m.name) && optional(m.manual, v => typeof v === 'boolean') && optional(m.vision, v => typeof v === 'boolean') && optional(m.contextWindow, number) && optional(m.reasoningEfforts, v => array(v, string)) && optional(m.defaultReasoning, string)));
   if (!object(value) || value.version !== 1 || value.historyFormat !== 2 || !array(value.profiles, profile) || !string(value.selected) || typeof value.remember !== 'boolean' || !optional(value.historyPath, string) || !optional(value.cachePath, string) || !optional(value.cacheEnabled, v => typeof v === 'boolean')
     || !optional(value.libraryConcurrency, n => Number.isInteger(n) && n >= 1 && n <= 8)
     || !optional(value.mineruConcurrency, n => Number.isInteger(n) && n >= 1 && n <= 50)

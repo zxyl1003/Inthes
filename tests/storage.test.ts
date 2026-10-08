@@ -14,11 +14,14 @@ const initialState=()=>({version:1,profiles:[api,chatgpt],selected:'api',remembe
 
 test('API billing mode and manual models survive reload with keys only in credentials',async()=>{
   const disk=historyDisk(),storage=await disk.newStorage();
-  const profile={...newProfile('minimax'),billingMode:'token-plan' as const,model:'MiniMax-M3',models:[{id:'MiniMax-M3',name:'MiniMax-M3'}]};
+  const profile={...newProfile('minimax'),billingMode:'token-plan' as const,model:'MiniMax-M3',models:[{id:'MiniMax-M3',name:'MiniMax-M3',manual:true}]};
   await storage.saveProfile(profile,'plan-test-secret');
   const restored=(await disk.newStorage()).state.profiles.find((p:any)=>p.id===profile.id);
   assert.equal(restored.billingMode,'token-plan');assert.equal(restored.models[0].id,'MiniMax-M3');
+  assert.equal(restored.models[0].manual,true);
   assert.ok(!JSON.stringify(disk.files.get(stateFile)).includes('plan-test-secret'));
+  await storage.saveProfile({...profile,model:'',models:[]},'plan-test-secret');
+  assert.equal((await disk.newStorage()).state.profiles.find((p:any)=>p.id===profile.id).models.length,0);
 });
 function historyDisk(saved:any=initialState(),initial:Record<string,any>={}) {
   const files=new Map<string,any>([[stateFile,structuredClone(saved)],[defaultHistory,{version:1,sessions:[structuredClone(conversation)]}],...Object.entries(initial)]),writes:string[]=[],logins:any[]=[];
